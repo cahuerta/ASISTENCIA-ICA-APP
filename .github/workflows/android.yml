@@ -8,7 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -21,29 +21,29 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      - name: Set up Android SDK
+      # Instalación del SDK + aceptación de licencias dentro del mismo paso
+      - name: Set up Android SDK (accept licenses)
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: latest
+          accept-android-sdk-licenses: true
+          log-accepted-android-sdk-licenses: true
           packages: |
             platforms;android-35
             build-tools;35.0.0
 
-      - name: Accept Android SDK licenses
-        run: yes | sdkmanager --licenses
-
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # --- BUILD APK (release) ---
+      # --- Construir APK release ---
       - name: Assemble release APK
-        run: ./gradlew :app:assembleRelease --stacktrace
+        run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      # --- (OPCIONAL) Si también quieres AAB, descomenta estas 2 líneas ---
+      # --- (Opcional) construir AAB release ---
       # - name: Bundle release (AAB)
-      #   run: ./gradlew :app:bundleRelease --stacktrace
+      #   run: ./gradlew :app:bundleRelease --stacktrace --no-daemon
 
-      # --- Mostrar qué se generó (para depurar rutas si hiciera falta) ---
+      # Mostrar qué se generó para verificar rutas
       - name: List outputs
         run: |
           echo "== find APK/AAB =="
@@ -51,7 +51,7 @@ jobs:
           echo "== tree app/build/outputs =="
           ls -R app/build/outputs || true
 
-      # --- Subir cualquier APK/AAB que exista ---
+      # Subir cualquier APK/AAB generado como artefacto
       - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
