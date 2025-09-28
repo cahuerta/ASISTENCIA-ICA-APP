@@ -21,7 +21,8 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Instala cmdline-tools y acepta licencias
+      # Solo instalamos cmdline-tools y aceptamos licencias.
+      # Gradle invocará sdkmanager por su cuenta para bajar plataformas/build-tools que falten.
       - name: Set up Android SDK (accept licenses)
         uses: android-actions/setup-android@v3
         with:
@@ -29,38 +30,23 @@ jobs:
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: true
 
-      # Asegurar paquetes correctos (con reintentos) para compileSdk 36
-      - name: Ensure Android packages (retry up to 3)
-        shell: bash
-        env:
-          SDKMANAGER: ${{ env.ANDROID_SDK_ROOT }}/cmdline-tools/latest/bin/sdkmanager
-        run: |
-          set -e
-          echo "sdkmanager at: $SDKMANAGER"
-          for i in 1 2 3; do
-            yes | "$SDKMANAGER" --install \
-              "platforms;android-36" \
-              "build-tools;36.0.0" \
-            && break || { echo "sdkmanager failed (try $i). Retrying..."; sleep 10; }
-          done
-          # Aceptar licencias por si quedó algo pendiente
-          yes | "$SDKMANAGER" --licenses
-
       - name: Make gradlew executable
         run: chmod +x ./gradlew
+
+      - name: Gradle info
+        run: ./gradlew --version
 
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      # - name: Bundle release (AAB)            # <- opcional, descomenta si quieres AAB
+      # Si más adelante quieres AAB, descomenta este bloque:
+      # - name: Bundle release (AAB)
       #   run: ./gradlew :app:bundleRelease --stacktrace --no-daemon
 
       - name: List outputs
         run: |
-          echo "== find APK/AAB =="
-          find app -type f \( -name "*.apk" -o -name "*.aab" \) -printf "%p\n" || true
-          echo "== tree app/build/outputs =="
-          ls -R app/build/outputs || true
+          echo "== outputs =="
+          find app/build/outputs -type f -printf "%p\n" || true
 
       - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
