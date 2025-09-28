@@ -21,29 +21,40 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # Instalación del SDK + aceptación de licencias dentro del mismo paso
+      # Instala cmdline-tools y acepta licencias
       - name: Set up Android SDK (accept licenses)
         uses: android-actions/setup-android@v3
         with:
           cmdline-tools-version: latest
           accept-android-sdk-licenses: true
           log-accepted-android-sdk-licenses: true
-          packages: |
-            platforms;android-35
-            build-tools;35.0.0
+
+      # Asegurar paquetes correctos (con reintentos) para compileSdk 36
+      - name: Ensure Android packages (retry up to 3)
+        shell: bash
+        env:
+          SDKMANAGER: ${{ env.ANDROID_SDK_ROOT }}/cmdline-tools/latest/bin/sdkmanager
+        run: |
+          set -e
+          echo "sdkmanager at: $SDKMANAGER"
+          for i in 1 2 3; do
+            yes | "$SDKMANAGER" --install \
+              "platforms;android-36" \
+              "build-tools;36.0.0" \
+            && break || { echo "sdkmanager failed (try $i). Retrying..."; sleep 10; }
+          done
+          # Aceptar licencias por si quedó algo pendiente
+          yes | "$SDKMANAGER" --licenses
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      # --- Construir APK release ---
       - name: Assemble release APK
         run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
-      # --- (Opcional) construir AAB release ---
-      # - name: Bundle release (AAB)
+      # - name: Bundle release (AAB)            # <- opcional, descomenta si quieres AAB
       #   run: ./gradlew :app:bundleRelease --stacktrace --no-daemon
 
-      # Mostrar qué se generó para verificar rutas
       - name: List outputs
         run: |
           echo "== find APK/AAB =="
@@ -51,7 +62,6 @@ jobs:
           echo "== tree app/build/outputs =="
           ls -R app/build/outputs || true
 
-      # Subir cualquier APK/AAB generado como artefacto
       - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
