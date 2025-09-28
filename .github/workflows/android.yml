@@ -8,16 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # Variables globales del job
-    env:
-      BUILD_TOOLS: "35.0.0"
-      ANDROID_API: "35"
-      # Cargar el secret en env (si no existe queda vacío y NO rompe el parser)
-      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -27,41 +18,45 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
           cache: gradle
 
-      # Instala SDK/Build-tools y acepta licencias (más simple y robusto)
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          api-level: ${{ env.ANDROID_API }}
-          build-tools: ${{ env.BUILD_TOOLS }}
+          cmdline-tools-version: latest
+          packages: |
+            platforms;android-35
+            build-tools;35.0.0
 
-      # Solo crea el keystore si de verdad subiste el secret
-      - name: Create keystore from secret (optional)
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
-
-      # Escribe credenciales (solo si existe el keystore)
-      - name: Write signing credentials
-        if: env.KEYSTORE_BASE64 != ''
-        run: |
-          {
-            echo "MYAPP_UPLOAD_STORE_FILE=keystore.jks"
-            echo "MYAPP_UPLOAD_STORE_PASSWORD=$KEYSTORE_PASSWORD"
-            echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
-            echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
-          } >> gradle.properties
+      - name: Accept Android SDK licenses
+        run: yes | sdkmanager --licenses
 
       - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build Release
-        run: ./gradlew --no-daemon assembleRelease
+      # --- BUILD APK (release) ---
+      - name: Assemble release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
 
-      - name: Upload APK artifact
+      # --- (OPCIONAL) Si también quieres AAB, descomenta estas 2 líneas ---
+      # - name: Bundle release (AAB)
+      #   run: ./gradlew :app:bundleRelease --stacktrace
+
+      # --- Mostrar qué se generó (para depurar rutas si hiciera falta) ---
+      - name: List outputs
+        run: |
+          echo "== find APK/AAB =="
+          find app -type f \( -name "*.apk" -o -name "*.aab" \) -printf "%p\n" || true
+          echo "== tree app/build/outputs =="
+          ls -R app/build/outputs || true
+
+      # --- Subir cualquier APK/AAB que exista ---
+      - name: Upload artifacts (APK/AAB)
         uses: actions/upload-artifact@v4
         with:
-          name: app-release-apk
-          path: app/build/outputs/apk/release/app-release.apk
+          name: android-artifacts
+          path: |
+            app/build/outputs/apk/**/*.apk
+            app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
