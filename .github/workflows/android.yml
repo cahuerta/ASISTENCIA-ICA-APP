@@ -8,9 +8,16 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+
+    # Variables globales del job
     env:
       BUILD_TOOLS: "35.0.0"
-      ANDROID_PLATFORM: "android-35"
+      ANDROID_API: "35"
+      # Cargar el secret en env (si no existe queda vacío y NO rompe el parser)
+      KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+      KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+      KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+      KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -23,34 +30,37 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Aceptar licencias SDK
-        run: yes | sdkmanager --licenses
+      # Instala SDK/Build-tools y acepta licencias (más simple y robusto)
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          api-level: ${{ env.ANDROID_API }}
+          build-tools: ${{ env.BUILD_TOOLS }}
 
-      - name: Instalar componentes del SDK
+      # Solo crea el keystore si de verdad subiste el secret
+      - name: Create keystore from secret (optional)
+        if: env.KEYSTORE_BASE64 != ''
         run: |
-          sdkmanager "build-tools;${BUILD_TOOLS}" "platforms;${ANDROID_PLATFORM}" "platform-tools" "cmdline-tools;latest"
+          echo "$KEYSTORE_BASE64" | base64 -d > keystore.jks
 
-      - name: Crear keystore desde secret (opcional)
-        if: ${{ secrets.KEYSTORE_BASE64 != '' }}
+      # Escribe credenciales (solo si existe el keystore)
+      - name: Write signing credentials
+        if: env.KEYSTORE_BASE64 != ''
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+          {
+            echo "MYAPP_UPLOAD_STORE_FILE=keystore.jks"
+            echo "MYAPP_UPLOAD_STORE_PASSWORD=$KEYSTORE_PASSWORD"
+            echo "MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS"
+            echo "MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> gradle.properties
 
-      - name: Escribir credenciales de firma
-        run: |
-          cat >> ./gradle.properties <<'EOF'
-          MYAPP_UPLOAD_STORE_FILE=keystore.jks
-          MYAPP_UPLOAD_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}
-          MYAPP_UPLOAD_KEY_ALIAS=${{ secrets.KEY_ALIAS }}
-          MYAPP_UPLOAD_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
-          EOF
-
-      - name: Dar permisos a gradlew
+      - name: Make gradlew executable
         run: chmod +x ./gradlew
 
-      - name: Build release
+      - name: Build Release
         run: ./gradlew --no-daemon assembleRelease
 
-      - name: Subir APK como artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-apk
