@@ -1,90 +1,167 @@
-name: Android CI (TWA)
+import groovy.xml.MarkupBuilder
 
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch: {}
+plugins {
+    id 'com.android.application'
+}
 
-jobs:
-  build:
-    runs-on: ubuntu-latest
+def twaManifest = [
+    applicationId: 'cl.icarticular.app',
+    hostName: 'icarticular.cl',
+    launchUrl: '/',
+    name: 'Asistente ICA',
+    launcherName: 'ICA',
+    themeColor: '#0EA5E9',
+    themeColorDark: '#000000',
+    navigationColor: '#000000',
+    navigationColorDark: '#000000',
+    navigationDividerColor: '#000000',
+    navigationDividerColorDark: '#000000',
+    backgroundColor: '#FFFFFF',
+    enableNotifications: true,
+    shortcuts: [],
+    splashScreenFadeOutDuration: 300,
+    generatorApp: 'bubblewrap-cli',
+    fallbackType: 'customtabs',
+    enableSiteSettingsShortcut: 'true',
+    orientation: 'default',
+]
 
-    env:
-      ANDROID_SDK_ROOT: /usr/local/android-sdk
-      # Cambia si tu módulo NO se llama "app"
-      APP_MODULE: app
-      BUILD_TOOLS: "33.0.2"
-      ANDROID_PLATFORM: "android-33"
+android {
+    // Recomendado para CI estable
+    compileSdkVersion 35
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    namespace "cl.icarticular.app"
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: 17
+    defaultConfig {
+        applicationId "cl.icarticular.app"
+        minSdkVersion 21
+        targetSdkVersion 35
+        versionCode 1
+        versionName "1"
 
-      - name: Install Android SDK Commandline Tools
-        run: |
-          sudo mkdir -p $ANDROID_SDK_ROOT/cmdline-tools
-          cd $ANDROID_SDK_ROOT/cmdline-tools
-          curl -sLo commandlinetools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-          sudo unzip -q commandlinetools.zip -d tools
-          rm commandlinetools.zip
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/tools/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT --licenses
+        resValue "string", "appName", twaManifest.name
+        resValue "string", "launcherName", twaManifest.launcherName
 
-      - name: Install SDK packages
-        run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/tools/bin/sdkmanager --sdk_root=$ANDROID_SDK_ROOT \
-            "platforms;${ANDROID_PLATFORM}" \
-            "build-tools;${BUILD_TOOLS}" \
-            "platform-tools"
+        def launchUrl = "https://" + twaManifest.hostName + twaManifest.launchUrl
+        resValue "string", "launchUrl", launchUrl
 
-      - name: Restore Gradle cache
-        uses: gradle/actions/setup-gradle@v3
+        // Web manifest / scope (tu PWA en Vercel)
+        resValue "string", "webManifestUrl", 'https://asistencia-ica.vercel.app/manifest.webmanifest'
+        resValue "string", "fullScopeUrl", 'https://asistencia-ica.vercel.app/'
 
-      - name: Decode keystore
-        run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+        // host para el intent-filter
+        resValue "string", "hostName", twaManifest.hostName
 
-      - name: Prepare signing (Gradle properties)
-        run: |
-          mkdir -p ~/.gradle
-          cat > ~/.gradle/gradle.properties <<'EOF'
-          MYAPP_UPLOAD_STORE_FILE=keystore.jks
-          MYAPP_UPLOAD_STORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }}
-          MYAPP_UPLOAD_KEY_ALIAS=${{ secrets.KEY_ALIAS }}
-          MYAPP_UPLOAD_KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
-          EOF
+        // Colores
+        resValue "color", "colorPrimary", twaManifest.themeColor
+        resValue "color", "colorPrimaryDark", twaManifest.themeColorDark
+        resValue "color", "navigationColor", twaManifest.navigationColor
+        resValue "color", "navigationColorDark", twaManifest.navigationColorDark
+        resValue "color", "navigationDividerColor", twaManifest.navigationDividerColor
+        resValue "color", "navigationDividerColorDark", twaManifest.navigationDividerColorDark
+        resValue "color", "backgroundColor", twaManifest.backgroundColor
 
-      - name: Verify gradle wrapper
-        run: chmod +x ./gradlew
+        // Splash provider
+        resValue "string", "providerAuthority", twaManifest.applicationId + '.fileprovider'
 
-      # Si tu build.gradle (del módulo app) ya usa signingConfigs leyendo esas propiedades,
-      # basta con assembleRelease:
-      - name: Build Release APK
-        run: ./gradlew :$APP_MODULE:assembleRelease --no-daemon
+        // Notificaciones delegadas
+        resValue "bool", "enableNotification", twaManifest.enableNotifications.toString()
 
-      # Subir artefactos (APK firmado). Rutas típicas de Bubblewrap/AGP:
-      - name: Upload APK(s)
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-release
-          path: |
-            ${{ github.workspace }}/${{ env.APP_MODULE }}/build/outputs/apk/release/*.apk
-            ${{ github.workspace }}/build/outputs/apk/release/*.apk
-          if-no-files-found: warn
+        // Shortcuts (si los usas)
+        twaManifest.shortcuts.eachWithIndex { shortcut, index ->
+            resValue "string", "shortcut_name_$index", "$shortcut.name"
+            resValue "string", "shortcut_short_name_$index", "$shortcut.short_name"
+        }
 
-      # (Opcional) también el AAB para Play Console:
-      - name: Build Release AAB
-        run: ./gradlew :$APP_MODULE:bundleRelease --no-daemon
+        // Animación splash
+        resValue "integer", "splashScreenFadeOutDuration", twaManifest.splashScreenFadeOutDuration.toString()
 
-      - name: Upload AAB
-        uses: actions/upload-artifact@v4
-        with:
-          name: aab-release
-          path: |
-            ${{ github.workspace }}/${{ env.APP_MODULE }}/build/outputs/bundle/release/*.aab
-          if-no-files-found: warn
+        resValue "string", "generatorApp", twaManifest.generatorApp
+        resValue "string", "fallbackType", twaManifest.fallbackType
+        resValue "bool", "enableSiteSettingsShortcut", twaManifest.enableSiteSettingsShortcut
+        resValue "string", "orientation", twaManifest.orientation
+    }
+
+    // === FIRMA PARA CI (lee de gradle.properties en ~/.gradle o del proyecto) ===
+    signingConfigs {
+        release {
+            // El workflow de Actions crea "keystore.jks" en la raíz del repo
+            def storeFilePath = project.findProperty("MYAPP_UPLOAD_STORE_FILE") ?: "keystore.jks"
+            storeFile file(storeFilePath)
+            storePassword project.findProperty("MYAPP_UPLOAD_STORE_PASSWORD") ?: ""
+            keyAlias project.findProperty("MYAPP_UPLOAD_KEY_ALIAS") ?: ""
+            keyPassword project.findProperty("MYAPP_UPLOAD_KEY_PASSWORD") ?: ""
+        }
+    }
+
+    buildTypes {
+        release {
+            // Para el primer build en CI, si quieres facilitarlo:
+            // minifyEnabled false
+            minifyEnabled true
+            // shrinkResources true  // opcional si activas minify
+            signingConfig signingConfigs.release
+            // Si usas ProGuard:
+            // proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+        debug {
+            // No firmamos debug con keystore de release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+
+    lintOptions {
+        checkReleaseBuilds false
+    }
+}
+
+task generateShorcutsFile {
+    assert twaManifest.shortcuts.size() < 5, "You can have at most 4 shortcuts."
+    twaManifest.shortcuts.eachWithIndex { s, i ->
+        assert s.name != null, 'Missing `name` in shortcut #' + i
+        assert s.short_name != null, 'Missing `short_name` in shortcut #' + i
+        assert s.url != null, 'Missing `icon` in shortcut #' + i
+        assert s.icon != null, 'Missing `url` in shortcut #' + i
+    }
+
+    def shortcutsFile = new File("$projectDir/src/main/res/xml", "shortcuts.xml")
+
+    def xmlWriter = new StringWriter()
+    def xmlMarkup = new MarkupBuilder(new IndentPrinter(xmlWriter, "    ", true))
+
+    xmlMarkup.'shortcuts'('xmlns:android': 'http://schemas.android.com/apk/res/android') {
+        twaManifest.shortcuts.eachWithIndex { s, i ->
+            'shortcut'(
+                'android:shortcutId': 'shortcut' + i,
+                'android:enabled': 'true',
+                'android:icon': '@drawable/' + s.icon,
+                'android:shortcutShortLabel': '@string/shortcut_short_name_' + i,
+                'android:shortcutLongLabel': '@string/shortcut_name_' + i
+            ) {
+                'intent'(
+                    'android:action': 'android.intent.action.MAIN',
+                    'android:targetPackage': twaManifest.applicationId,
+                    'android:targetClass': twaManifest.applicationId + '.LauncherActivity',
+                    'android:data': s.url
+                )
+                'categories'('android:name': 'android.intent.category.LAUNCHER')
+            }
+        }
+    }
+    shortcutsFile.text = xmlWriter.toString() + '\n'
+}
+
+preBuild.dependsOn(generateShorcutsFile)
+
+repositories {
+    // (vacío está bien)
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.6.2'
+}
